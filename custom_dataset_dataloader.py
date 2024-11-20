@@ -10,7 +10,7 @@ import os
 from config import config
 
 # read csv that we created in `create_csv.py` file
-df = pd.read_csv('./csv_dataset/utkface_dataset.csv')
+df = pd.read_csv('utkface_dataset.csv')
 
 df_train, df_test = train_test_split(df, train_size=0.8, random_state=config['seed'])
 df_train, df_valid = train_test_split(df_train, train_size=0.85, random_state=config['seed'])
@@ -69,7 +69,7 @@ class UTKDataset(Dataset):
 
 
 # Utilize the UTKDataset class to instantiate dataset objects for the training, validation, and test sets.
-root_dir = '/home/deep/projects/Mousavi/Facial_Age_estimation_PyTorch/dataset/utkcropped'
+root_dir = '/home/anacotler/Documents/vision_artificial/tpf_vision/utkcropped'
 csv_file_train = './csv_dataset/train_set.csv'
 csv_file_valid = './csv_dataset/valid_set.csv'
 csv_file_test = './csv_dataset/test_set.csv'
