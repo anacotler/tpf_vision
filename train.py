@@ -70,11 +70,17 @@ for epoch in range(config['epochs']):
     writer.add_scalar('Loss/train', loss_train, epoch)
     writer.add_scalar('Loss/test', loss_valid, epoch)
     
-    if epoch % 5 == 0:
-        print()
-        print(f'Train: loss={loss_train:.3}')
-        print(f'Valid: loss={loss_valid:.3}')
-        print()
+
+    print()
+    print(f'Train: loss={loss_train:.3}')
+    print(f'Valid: loss={loss_valid:.3}')
+    print()
+    
+    #if epoch % 5 == 0:
+    #    print()
+    #    print(f'Train: loss={loss_train:.3}')
+    #    print(f'Valid: loss={loss_valid:.3}')
+    #    print()
 
 
 writer.close()
