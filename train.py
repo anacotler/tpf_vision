@@ -23,7 +23,7 @@ except OSError as error:
 # Define model, define optimizer and Set learning rate and weight decay.
 model = AgeEstimationModel(input_dim=3, output_nodes=1, model_name='resnet', pretrain_weights='IMAGENET1K_V2').to(config['device'])
 loss_fn = nn.L1Loss()
-metric = tm.MeanAbsoluteError().to(config['device'])
+metric = tm.MeanAbsoluteError().to(config['device'])    
 optimizer = optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=config['wd'])
 
 # Write code to train the model for num_epochs epochs.
@@ -75,7 +75,7 @@ for epoch in range(config['epochs']):
     print(f'Train: loss={loss_train:.3}')
     print(f'Valid: loss={loss_valid:.3}')
     print()
-    
+
     #if epoch % 5 == 0:
     #    print()
     #    print(f'Train: loss={loss_train:.3}')

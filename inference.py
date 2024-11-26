@@ -23,7 +23,7 @@ def inference(model, image_path, output_path):
         
         # Extract the age estimation value from the output tensor
         age_estimation = outputs.item()
-        
+        """
         # Create a PIL image with the age estimation value as text
         output_image = image.copy()
         draw = ImageDraw.Draw(output_image)
@@ -33,7 +33,9 @@ def inference(model, image_path, output_path):
         
         # Save the output image
         output_image.save(output_path)
-
+        """
+        return age_estimation
+"""
 path = "/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints"
 checkpoint_files = glob.glob(os.path.join(path, 'epoch-*-loss_valid-*.pt'))
 latest_checkpoint = max(checkpoint_files, key=os.path.getctime)
@@ -45,3 +47,64 @@ model.load_state_dict(torch.load(latest_checkpoint, weights_only=True))
 image_path_test = config['image_path_test'] # Path to the input image
 output_path_test = config['output_path_test']  # Path to save the output image
 inference(model, image_path_test, output_path_test)
+"""
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+
+from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_squared_error
+
+# # Dados los pesos de mi modelo, lo cargo, y hago la prediccion de todo el test. Quiero medir el error que obtengo en el test.
+path = "/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints"
+#checkpoint_files = glob.glob(os.path.join(path, 'epoch-*-loss_valid-*.pt'))
+checkpoint_files = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/epoch-14-loss_valid-13.5.pt'
+#latest_checkpoint = max(checkpoint_files, key=os.path.getctime)
+
+model = AgeEstimationModel(input_dim=3, output_nodes=1, model_name=config['model_name'], pretrain_weights='IMAGENET1K_V2').to(config['device'])
+# Load the model using the latest checkpoint file
+#model.load_state_dict(torch.load(latest_checkpoint, weights_only=True))
+model.load_state_dict(torch.load(checkpoint_files, weights_only=True))
+
+path_csv_dataset = '/home/anacotler/Documents/vision_artificial/tpf_vision/csv_dataset/test_set.csv'
+df = pd.read_csv(path_csv_dataset)
+df['age'] = df['age'].astype(np.float32)
+
+# hacer la prediccion de todo el test
+output_path = ''
+
+reales = []
+predicciones = []
+
+for i in range(len(df)):
+    print(i)
+    image_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/utkcropped/'+df['image_name'][i]
+    age = df['age'][i]
+    prediction = inference(model, image_path, output_path)
+    reales.append(age)
+    predicciones.append(prediction)
+
+reales = np.array(reales)
+predicciones = np.array(predicciones)
+
+# Calcular el error
+mae = mean_absolute_error(reales, predicciones)
+mse = mean_squared_error(reales, predicciones)
+print(f"Mean Absolute Error: {mae:.2f}")
+print(f"Mean Squared Error: {mse:.2f}")
+
+# Graficar
+plt.scatter(reales, predicciones)
+plt.xlabel('Real')
+plt.ylabel('Predicción')
+plt.title(f'Real vs Predicción (MAE: {mae:.2f})')
+plt.show()
+
+
+
+
+
+
+
+
+

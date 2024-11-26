@@ -18,6 +18,11 @@ class AgeEstimationModel(nn.Module):
             self.model.fc = nn.Sequential(nn.Dropout(p=0.2, inplace=True),
                                           nn.Linear(in_features=2048, out_features=256, bias=True),
                                           nn.Linear(in_features=256, out_features=self.output_nodes, bias=True))
+        
+          # Congelar todas las capas excepto la capa `fc`
+            for name, param in self.model.named_parameters():
+                if not name.startswith("fc"):  # Congela las capas que no son `fc`
+                    param.requires_grad = False
 
         elif model_name == 'efficientnet':
             self.model = efficientnet_b0()

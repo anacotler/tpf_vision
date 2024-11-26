@@ -10,7 +10,7 @@ config = {
     'root_dir': '',
     'csv_path': '',
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-    'image_path_test': '/home/anacotler/Documents/vision_artificial/tpf_vision/img_test/40_0_2.jpg',
+    'image_path_test': '/home/anacotler/Documents/vision_artificial/tpf_vision/img_test/24_0_1.jpg',
     'output_path_test': '/home/anacotler/Documents/vision_artificial/tpf_vision/img_test/output.jpg',
     'leaky_relu': False,
     'epochs': 15,

@@ -17,7 +17,7 @@ import torchmetrics as tm
 
 model = AgeEstimationModel(input_dim=3, 
                            output_nodes=1, 
-                           model_name='efficientnet', 
+                           model_name='resnet', 
                            pretrain_weights='IMAGENET1K_V1').to(config['device'])
 
 loss_fn = nn.L1Loss()
