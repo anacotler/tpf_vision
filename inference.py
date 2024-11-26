@@ -58,7 +58,7 @@ from sklearn.metrics import mean_squared_error
 # # Dados los pesos de mi modelo, lo cargo, y hago la prediccion de todo el test. Quiero medir el error que obtengo en el test.
 path = "/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints"
 #checkpoint_files = glob.glob(os.path.join(path, 'epoch-*-loss_valid-*.pt'))
-checkpoint_files = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/epoch-14-loss_valid-13.5.pt'
+checkpoint_files = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/epoch-14-loss_valid-5.74.pt'
 #latest_checkpoint = max(checkpoint_files, key=os.path.getctime)
 
 model = AgeEstimationModel(input_dim=3, output_nodes=1, model_name=config['model_name'], pretrain_weights='IMAGENET1K_V2').to(config['device'])
@@ -76,16 +76,49 @@ output_path = ''
 reales = []
 predicciones = []
 
+outliers_real = []
+outliers_pred = []
+
+
 for i in range(len(df)):
-    print(i)
+    #print(i)
     image_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/utkcropped/'+df['image_name'][i]
     age = df['age'][i]
     prediction = inference(model, image_path, output_path)
+
+    # Ajustar la prediccion a numeros enteros
+
+    if prediction < 1 and prediction > 0:
+        prediction = 1
+    elif prediction < 0:
+        prediction = 0
+    elif prediction > 100:
+        prediction = 100
+    else:
+        prediction = round(prediction)
+    
+    if np.abs(age - prediction) > 10:
+        #print(f"Real: {age}, Predicción: {prediction}")
+        #print(f"Image: {image_path}")
+        #print('')
+        outliers_real.append(age)
+        outliers_pred.append(prediction)
+
+
     reales.append(age)
     predicciones.append(prediction)
 
 reales = np.array(reales)
 predicciones = np.array(predicciones)
+
+outliers_real = np.array(outliers_real)
+outliers_pred = np.array(outliers_pred)
+
+plt.scatter(outliers_real, outliers_pred)
+plt.xlabel('Real')
+plt.ylabel('Predicción')
+plt.title(f'Real vs Predicción (Outliers) with {len(outliers_real)} outliers')
+plt.show()
 
 # Calcular el error
 mae = mean_absolute_error(reales, predicciones)
