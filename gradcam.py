@@ -10,6 +10,28 @@ from config import config
 import os
 from torchvision import models
 
+# Visualize attribution scores with Matplotlib
+def visualize_attr(attr, original_image, alpha=0.6, cmap='jet'):
+    """
+    Superpone un mapa de calor sobre la imagen original.
+    Args:
+        attr: Atribuciones generadas (numpy array 2D).
+        original_image: Imagen original (numpy array HxWxC en rango [0, 1]).
+        alpha: Transparencia para superposición.
+        cmap: Mapa de color para el heatmap.
+    """
+    plt.figure(figsize=(8, 8))
+    
+    # Mostrar imagen original
+    plt.imshow(original_image)
+    
+    # Superponer mapa de calor
+    plt.imshow(attr, cmap=cmap, alpha=alpha)
+    
+    # Eliminar ejes
+    plt.axis('off')
+    plt.show()
+
 
 # # Dados los pesos de mi modelo, lo cargo, y hago la prediccion de todo el test. Quiero medir el error que obtengo en el test.
 path = "/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints"
@@ -50,14 +72,28 @@ attr_upsampled = LayerAttribution.interpolate(attr, (config['img_width'], config
 original_image = np.array(image) / 255.0  # Normalize to [0, 1] range
 
 # Visualize the attribution scores
-from captum.attr import visualize_image_attr
-_ = visualize_image_attr(attr_upsampled, original_image, method='blended_heat_map', sign='all', show_colorbar=True, title='LayerGradCam')
+visualize_attr(attr_upsampled, original_image, alpha=0.6, cmap='jet')
 
-# Save the visualization
-plt.savefig('gradcam.png')
 
-# Display the visualization
-plt.show()
+
+# from captum.attr import visualize_image_attr
+# _ = visualize_image_attr(attr_upsampled, original_image, method='blended_heat_map', sign='all', show_colorbar=True, title='LayerGradCam')
+
+# # Save the visualization
+# plt.savefig('gradcam.png')
+
+# # Display the visualization
+# plt.show()
+
+# # Prepara el original y la atribución
+# original_image = np.array(image) / 255.0  # Escala imagen a rango [0, 1]
+# attr_upsampled = LayerAttribution.interpolate(attr, (config['img_width'], config['img_height'])).squeeze(0).cpu().numpy()
+
+# # Normaliza las atribuciones
+# attr_upsampled = (attr_upsampled - np.min(attr_upsampled)) / (np.max(attr_upsampled) - np.min(attr_upsampled))
+
+# # Visualiza
+# visualize_attr(attr_upsampled, original_image)
 
 
 
