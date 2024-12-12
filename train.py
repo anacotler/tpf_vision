@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 
 from config import config
 from model import AgeEstimationModel
+from model2 import AgeEstimationModel2
+from model3 import ResNet50WithAttention
 from functions import train_one_epoch, validation
 from custom_dataset_dataloader import train_loader, valid_loader
 
@@ -21,10 +23,26 @@ except OSError as error:
 
 # Step 5: Train model for longer epochs using the best model from step 4 in hyperparameters_tuning.
 # Define model, define optimizer and Set learning rate and weight decay.
-model = AgeEstimationModel(input_dim=3, output_nodes=1, model_name='resnet', pretrain_weights='IMAGENET1K_V2').to(config['device'])
+#model = AgeEstimationModel2(input_dim=3, output_nodes=1, model_name='resnet', pretrain_weights='IMAGENET1K_V2').to(config['device'])
+model = ResNet50WithAttention(output_nodes=1).to(config['device'])
 loss_fn = nn.L1Loss()
 metric = tm.MeanAbsoluteError().to(config['device'])    
-optimizer = optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=config['wd'])
+#optimizer = optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=config['wd'])
+optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=config['lr'], momentum=0.9, weight_decay=config['wd'])
+
+
+# Define checkpoint path (si existe)
+#checkpoint_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/19EPOCHSALL_epoch-0-loss_valid-5.66.pt' 
+#checkpoint_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/capa_epoch-5-loss_valid-8.49.pt'
+#checkpoint_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/capa_epoch-34-loss_valid-5.18.pt'
+checkpoint_path = ''
+# Si existe, carga el modelo y el optimizador
+if os.path.exists(checkpoint_path):
+    print(f"Cargando checkpoint desde {checkpoint_path}")
+    model.load_state_dict(torch.load(checkpoint_path))
+else:
+    print("No se encontró un checkpoint. Entrenando desde cero.")
+
 
 # Write code to train the model for num_epochs epochs.
 best_loss = torch.inf
@@ -63,7 +81,7 @@ for epoch in range(config['epochs']):
         best_loss = loss_valid
         if before_model_path is not None:
             os.remove(before_model_path)
-        before_model_path = f'checkpoints/epoch-{epoch}-loss_valid-{best_loss:.3}.pt'
+        before_model_path = f'checkpoints/capa_cong_epoch-{epoch}-loss_valid-{best_loss:.3}.pt'
         torch.save(model.state_dict(), before_model_path)
         print(f'\nModel saved in epoch: {epoch}')
 
