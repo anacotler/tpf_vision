@@ -151,7 +151,7 @@ def detect_faces_and_eyes_opencv(image_path, output_dir):
 
 
 # Rutas de ejemplo
-image_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/pibes.jpg'
+image_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/nina9.jpg'
 output_dir = '/home/anacotler/Documents/vision_artificial/tpf_vision/cropped_faces'
 os.makedirs(output_dir, exist_ok=True)
 
