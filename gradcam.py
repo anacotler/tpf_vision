@@ -190,7 +190,7 @@ from captum.attr import LayerGradCam, LayerAttribution
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
-from model import AgeEstimationModel
+from model_congelado import AgeEstimationModel
 from config import config
 
 # Función para crear una grilla de visualizaciones
@@ -222,13 +222,16 @@ def plot_attributions_grid(attributions, original_image, cols=4, cmap='jet'):
 
 
 # Cargar el modelo y pesos
-checkpoint_files = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/epoch-14-loss_valid-13.5.pt'
+# checkpoint_files = '/home/anacotler/Documents/vision_artificial/tpf_vision/checkpoints/epoch-14-loss_valid-13.5.pt'
+checkpoint_files = '/Users/ninarigal/UDESA/TERCER AÑO/VISIÓN ARTIFICIAL/tpf_vision-1/checkpoints/18EPOCHSALL_epoch-0-loss_valid-5.51.pt'
+
 model = AgeEstimationModel(input_dim=3, output_nodes=1, model_name=config['model_name'], pretrain_weights='IMAGENET1K_V2').to(config['device'])
 model.load_state_dict(torch.load(checkpoint_files, map_location=config['device']))
 model.eval()
 
 # Cargar la imagen
-image_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/utkcropped/15_1_0_20170109203912357.jpg.chip.jpg'
+# image_path = '/home/anacotler/Documents/vision_artificial/tpf_vision/utkcropped/15_1_0_20170109203912357.jpg.chip.jpg'
+image_path = '/Users/ninarigal/UDESA/TERCER AÑO/VISIÓN ARTIFICIAL/tpf_vision-1/utkcropped/15_1_0_20170109203912357.jpg.chip.jpg'
 image = Image.open(image_path).convert('RGB')
 
 # Preprocesar la imagen
