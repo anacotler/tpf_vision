@@ -1,0 +1,18 @@
+# Pesos de los modelos (se bajan del Drive; ver codigo/README.md)
+checkpoints/
+*.pt
+*.pth
+
+# Modelos de deteccion descargables (YuNet, etc.)
+models/
+*.onnx
+
+# Salidas generadas por la demo
+demo_output.jpg
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
