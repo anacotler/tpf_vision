@@ -8,17 +8,26 @@ numero (Grad-CAM u oclusion, ver explicabilidad.py).
 El recorte por defecto es ALINEADO: usa los 5 landmarks de YuNet para reproducir
 el encuadre de UTKFace (ver PLANTILLA_UTK). Importa mucho mas de lo que parece
 —el modelo se entreno con caras alineadas y es muy sensible al encuadre—; sobre
-img_test/ el error medio baja de 9.6 a 1.6 anios, y una cara de 73 pasa de
+data/samples/ el error medio baja de 9.6 a 1.6 anios, y una cara de 73 pasa de
 predecirse 33 a 71. Con --recorte cuadrado se vuelve al recorte con margen.
 
 Uso tipico (con la webcam):
-    python demo_vivo.py
+    python -m age_estimation.demo
 
 Probar sobre una imagen (sin webcam), guarda la ventana entera a disco:
-    python demo_vivo.py --image fotosprueba/1_0_0_20161219204512212.jpg.chip.jpg
+    python -m age_estimation.demo --image data/samples/40_0_2.jpg
 
-Bajar el error con ensemble de los 2 mejores modelos:
-    python demo_vivo.py --ensemble
+Por defecto usa --modelo combinado: promedia arista (ResNet-50, 128 px) y la
+ResNet-101 a 200 px entrenada con aumentacion tipo webcam
+(training/train_resnet101.py --aug fuerte). En el test de data/processed/ baja
+el MAE de 5.11 a 4.78 y es el mas estable frente a ruido tipo webcam. Para un solo modelo:
+    python -m age_estimation.demo --modelo arista
+    python -m age_estimation.demo --modelo resnet101
+
+Estabilidad en vivo (con el suavizado prendido, tecla 's'): los landmarks se
+filtran en el tiempo antes de recortar, la edad se promedia sobre hasta 5 recortes
+levemente corridos + sus espejos (--recortes-tta, 1 por defecto), y despues se suaviza con EMA o mediana
+(--suavizado mediana --ventana 9).
 
 Teclas (tambien estan en pantalla con 'h'):
     q / ESC  salir                     e  explicacion on/off
@@ -30,9 +39,11 @@ Teclas (tambien estan en pantalla con 'h'):
 """
 import argparse
 import datetime as dt
+import math
 import os
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -42,11 +53,11 @@ import torch
 import torchvision.transforms as T
 from PIL import Image
 
-import interfaz as ui
-from explicabilidad import (GradCAM, atribucion_por_region, dibujar_contornos_regiones,
+from age_estimation.demo import ui
+from age_estimation.explainability import (GradCAM, atribucion_por_region, dibujar_contornos_regiones,
                             landmarks_estimados, mapa_oclusion, mascaras_regiones,
                             normalizar, resolver_capa, superponer, ventana_ovalo)
-from model_arista import AgeEstimationModel as AristaModel
+from age_estimation.models.arista import AgeEstimationModel as AristaModel
 
 # ----------------------------------------------------------------------------
 # Config
@@ -61,21 +72,25 @@ DEVICE = (
     else 'cpu'
 )
 
+# Raiz del repo: las rutas por defecto (models/, reports/captures/) salen de aca y no
+# del directorio desde donde se lance, asi la demo anda desde cualquier lado.
+RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
 # Modelo YuNet (opcional pero muy recomendado: ademas de detectar mejor, da los
 # 5 landmarks que usamos para nombrar las regiones de la cara).
-YUNET_PATH = os.path.join('models', 'face_detection_yunet_2023mar.onnx')
+YUNET_PATH = os.path.join(RAIZ, 'models', 'face_detection_yunet_2023mar.onnx')
 
 ANCHO_PANEL = 400          # ancho del panel de explicacion, a la derecha
 ALTO_BARRA = 58            # franja inferior con el disclaimer
 ALTO_MIN = 730             # alto minimo del lienzo, para que entre el panel
 TAM_EXPL = 260             # lado en el que se calcula y se muestra el mapa
 
-CARPETA_CAPTURAS = 'capturas'
+CARPETA_CAPTURAS = os.path.join(RAIZ, 'reports', 'captures')
 
 # Plantilla de alineacion de UTKFace, en fracciones del lado del recorte.
 # UTKFace no son fotos crudas: son "chips" ya alineados, y por eso los 5 puntos
 # caen casi siempre en el mismo lugar. Estos valores salen de correr YuNet sobre
-# los chips de img_test/ (desvio de 0.012-0.019 del lado en los ojos).
+# los chips de data/samples/ (desvio de 0.012-0.019 del lado en los ojos).
 # Reproducir este encuadre en la webcam es lo que hace que el modelo vea lo
 # mismo que vio entrenando; con el recorte cuadrado a ojo el error se triplica.
 PLANTILLA_UTK = np.array([
@@ -87,11 +102,59 @@ PLANTILLA_UTK = np.array([
 ], dtype=np.float32)
 TAM_ALINEADO = 200    # lado nativo de los chips de UTKFace
 
-_transform = T.Compose([
-    T.Resize((IMG_SIZE, IMG_SIZE)),
-    T.ToTensor(),
-    T.Normalize(mean=MEAN, std=STD),
-])
+_transforms = {}
+
+# Bajarle la nitidez al recorte (200 px) antes de pasarlo a la red.
+# Las caras de UTKFace son blandas (muchas son fotos chicas reescaladas): su
+# nitidez (varianza del Laplaciano) tiene mediana ~36, mientras que una webcam
+# a 1 m da 300-700. Ante ese detalle extra la red lee "piel lisa de chico":
+# a una persona de 27 la ResNet-101 le daba ~14.
+#
+# Por defecto se ACHICA el recorte a 64 px (y la red lo vuelve a agrandar).
+# Sobre 6 capturas de la misma persona en distintas poses dio 18-26 anios
+# (con blur sigma=1.0 daba 16-32), a costa de subir el MAE en UTKFace de
+# 4.95 a 5.15. El blur queda como alternativa (--blur 1.0 --reducir 0).
+REDUCIR_ENTRADA = 64
+SIGMA_ENTRADA = 0.0
+
+# Las fotos de UTKFace tienen mas contraste que una webcam con luz pareja de
+# oficina, y con la imagen "chata" la red tambien tira la edad para abajo.
+# Estirar la luminancia de la cara (percentiles 2-98) subio la edad promedio
+# de 20.1 a 22.7 en 12 capturas de una persona de 27 y achico la diferencia
+# entre poses; en UTKFace el MAE pasa de 5.24 a 5.37.
+AUTOCONTRASTE = True
+
+
+class AutoContraste:
+    """Estira la luminancia (canal L de Lab) al rango de percentiles 2-98 del
+    centro del recorte, que es donde esta la cara; el color no se toca."""
+
+    def __call__(self, pil):
+        lab = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2LAB)
+        lum = lab[..., 0].astype(np.float32)
+        alto, ancho = lum.shape
+        centro = lum[alto // 5:alto * 4 // 5, ancho // 5:ancho * 4 // 5]
+        bajo, alto_p = np.percentile(centro, (2, 98))
+        lab[..., 0] = np.clip((lum - bajo) / max(alto_p - bajo, 1.0) * 255, 0, 255).astype(np.uint8)
+        return Image.fromarray(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB))
+
+
+def transform_de(modelo):
+    """Preprocesamiento del modelo: cada uno se entreno a su tamano de entrada
+    (arista a 128 px, la ResNet-101 a 200), guardado en `modelo.tam_entrada`."""
+    tam = getattr(modelo, 'tam_entrada', IMG_SIZE)
+    clave = (tam, SIGMA_ENTRADA, REDUCIR_ENTRADA, AUTOCONTRASTE)
+    if clave not in _transforms:
+        contraste = [AutoContraste()] if AUTOCONTRASTE else []
+        blur = ([T.GaussianBlur(kernel_size=2 * math.ceil(3 * SIGMA_ENTRADA) + 1,
+                                sigma=SIGMA_ENTRADA)] if SIGMA_ENTRADA > 0 else [])
+        reducir = [T.Resize((REDUCIR_ENTRADA, REDUCIR_ENTRADA))] if REDUCIR_ENTRADA > 0 else []
+        _transforms[clave] = T.Compose(contraste + blur + reducir + [
+            T.Resize((tam, tam)),
+            T.ToTensor(),
+            T.Normalize(mean=MEAN, std=STD),
+        ])
+    return _transforms[clave]
 
 NOTAS_METODO = {
     'gradcam': ("Pesa las activaciones de una capa convolucional",
@@ -110,7 +173,7 @@ AYUDA = [
     ("r", "contornos de las regiones"),
     ("s", "suavizado temporal: edad, mapa y barras"),
     ("f", "pantalla completa"),
-    ("g", "guardar captura en capturas/"),
+    ("g", "guardar captura en reports/captures/"),
 ]
 
 
@@ -133,10 +196,15 @@ class FaceDetector:
     modelo onnx esta presente; si no, cae a Haar cascade (peor, sin landmarks,
     pero viene con OpenCV)."""
 
-    def __init__(self, prefer='auto'):
+    def __init__(self, prefer='auto', ancho_max=640):
         self.mode = None
         self.yunet = None
         self.haar = None
+        # YuNet corre sobre el frame achicado a este ancho. A 1280x720 tarda ~36
+        # ms en CPU y a 640 ~5 ms, y los landmarks salen igual de precisos
+        # (medido contra la plantilla de UTKFace: 0.07 vs 0.09 de la distancia
+        # entre ojos), asi que no tiene sentido pagar la resolucion completa.
+        self.ancho_max = ancho_max
 
         want_yunet = prefer in ('auto', 'yunet') and hasattr(cv2, 'FaceDetectorYN')
         if want_yunet and os.path.exists(YUNET_PATH):
@@ -166,6 +234,11 @@ class FaceDetector:
         """Devuelve lista de Deteccion."""
         if self.mode == 'yunet':
             alto, ancho = frame_bgr.shape[:2]
+            escala = min(1.0, self.ancho_max / ancho) if self.ancho_max else 1.0
+            if escala < 1.0:
+                frame_bgr = cv2.resize(frame_bgr, None, fx=escala, fy=escala,
+                                       interpolation=cv2.INTER_AREA)
+                alto, ancho = frame_bgr.shape[:2]
             self.yunet.setInputSize((ancho, alto))
             _, caras = self.yunet.detect(frame_bgr)
             if caras is None:
@@ -174,8 +247,9 @@ class FaceDetector:
             for cara in caras:
                 # Formato YuNet: x, y, w, h, 5 landmarks (x,y), score.
                 # Landmarks: ojo der, ojo izq, nariz, comisura der, comisura izq.
-                caja = tuple(int(v) for v in cara[:4])
-                landmarks = np.asarray(cara[4:14], dtype=np.float32).reshape(5, 2)
+                # Se devuelven en pixeles del frame ORIGINAL.
+                caja = tuple(int(round(v / escala)) for v in cara[:4])
+                landmarks = np.asarray(cara[4:14], dtype=np.float32).reshape(5, 2) / escala
                 salida.append(Deteccion(caja, landmarks, float(cara[14])))
             return salida
         # Haar
@@ -286,10 +360,10 @@ def obtener_recorte(frame_bgr, deteccion, margen=0.2, modo='alineado'):
     return recortar_cara(frame_bgr, deteccion.caja, margen)
 
 
-def a_tensor(recorte_bgr):
-    """Recorte BGR -> tensor [1, 3, 128, 128] normalizado, en el device."""
+def a_tensor(recorte_bgr, modelo):
+    """Recorte BGR -> tensor [1, 3, tam, tam] normalizado para `modelo`, en el device."""
     rgb = cv2.cvtColor(recorte_bgr, cv2.COLOR_BGR2RGB)
-    return _transform(Image.fromarray(rgb)).unsqueeze(0).to(DEVICE)
+    return transform_de(modelo)(Image.fromarray(rgb)).unsqueeze(0).to(DEVICE)
 
 
 # ----------------------------------------------------------------------------
@@ -302,7 +376,20 @@ def load_arista(weights_path):
     ).to(DEVICE)
     state = torch.load(weights_path, map_location=DEVICE, weights_only=True)
     model.load_state_dict(state)
-    model.eval()
+    model.eval().to(memory_format=torch.channels_last)
+    model.tam_entrada = 128
+    return model
+
+
+def load_resnet101(weights_path):
+    """ResNet-101 con cabeza de distribucion (models/resnet101.py), entrenada a
+    200 px con training/train_resnet101.py."""
+    from age_estimation.models.resnet101 import AgeResNet
+    model = AgeResNet('resnet101', pretrain_weights=None).to(DEVICE)
+    state = torch.load(weights_path, map_location=DEVICE, weights_only=True)
+    model.load_state_dict(state)
+    model.eval().to(memory_format=torch.channels_last)
+    model.tam_entrada = 200
     return model
 
 
@@ -333,26 +420,64 @@ def load_finetuneada(weights_path):
     return model
 
 
+# Variaciones (escala, dx, dy) del recorte alineado para el TTA multi-recorte,
+# en fracciones del lado. El modelo es sensible a corrimientos chicos del
+# encuadre (un 2-3% de jitter en los landmarks mueve la edad varios anios);
+# promediar sobre estas 5 vistas baja esa sensibilidad ~30% con un solo forward
+# (con 9 vistas, ~38%, pero al doble de costo por frame).
+VARIANTES_TTA = [(1.00, 0.00, 0.00), (1.04, 0.00, 0.00), (0.96, 0.00, 0.00),
+                 (1.00, 0.02, 0.00), (1.00, -0.02, 0.00)]
+
+
+def variantes_recorte(frame_bgr, recorte, variantes=VARIANTES_TTA):
+    """Recortes ligeramente corridos/escalados alrededor del alineado.
+
+    Se re-muestrean desde el frame (componiendo con `recorte.M`) y no desde el
+    recorte, asi los bordes traen cara real y no pixeles replicados. Para el
+    recorte cuadrado devuelve solo el original.
+    """
+    if not recorte.alineado:
+        return [recorte.imagen]
+    lado = recorte.lado
+    M = np.vstack([recorte.M, [0, 0, 1]])
+    salida = []
+    for escala, dx, dy in variantes:
+        A = cv2.getRotationMatrix2D((lado / 2, lado / 2), 0, escala)
+        A[:, 2] += (dx * lado, dy * lado)
+        salida.append(cv2.warpAffine(frame_bgr, (np.vstack([A, [0, 0, 1]]) @ M)[:2],
+                                     (lado, lado), flags=cv2.INTER_CUBIC,
+                                     borderMode=cv2.BORDER_REPLICATE))
+    return salida
+
+
 @torch.no_grad()
-def predecir_edad(models, crop_bgr, tta=True):
-    """Predice edad promediando modelos y, si tta, la imagen espejada.
+def predecir_edad(models, crops_bgr, tta=True):
+    """Predice edad promediando modelos, recortes y, si tta, la imagen espejada.
+
+    `crops_bgr` es un recorte o una lista (ver `variantes_recorte`).
 
     Devuelve (edad, dispersion). La dispersion es el desvio entre las vistas
-    (original / espejada / cada modelo del ensemble). NO es un intervalo de
+    (recortes / espejadas / cada modelo del ensemble). NO es un intervalo de
     confianza: solo dice cuanto se contradice el sistema consigo mismo, que en
     el stand alcanza para mostrar cuando la prediccion es fragil.
     """
-    rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
-    pil = Image.fromarray(rgb)
-
-    tensors = [_transform(pil)]
-    if tta:
-        tensors.append(_transform(pil.transpose(Image.FLIP_LEFT_RIGHT)))
-    batch = torch.stack(tensors).to(DEVICE)
+    if isinstance(crops_bgr, np.ndarray):
+        crops_bgr = [crops_bgr]
+    pils = []
+    for crop in crops_bgr:
+        pil = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+        pils.append(pil)
+        if tta:
+            pils.append(pil.transpose(Image.FLIP_LEFT_RIGHT))
 
     vistas = []
     for model in models:
-        salida = model(batch).reshape(-1).float().cpu().numpy()
+        transform = transform_de(model)
+        batch = torch.stack([transform(p) for p in pils]).to(DEVICE)
+        batch = batch.to(memory_format=torch.channels_last)
+        # fp16 en GPU: ~35% menos tiempo y la edad cambia en centesimas de anio.
+        with torch.autocast('cuda', dtype=torch.float16, enabled=DEVICE == 'cuda'):
+            salida = model(batch).reshape(-1).float().cpu().numpy()
         vistas.extend(salida.tolist())
     return float(np.mean(vistas)), float(np.std(vistas))
 
@@ -370,17 +495,66 @@ def clamp_age(pred):
 # ----------------------------------------------------------------------------
 # Suavizado temporal
 # ----------------------------------------------------------------------------
+class SuavizadorLandmarks:
+    """Filtra los landmarks en el tiempo ANTES de recortar.
+
+    YuNet mueve los 5 puntos uno o dos pixeles entre frames aunque la persona
+    este quieta; como el recorte alineado sale de esos puntos, el encuadre
+    tiembla y la edad con el. Media exponencial por cara, con alpha adaptativo:
+    si la cara se mueve rapido (respecto de la distancia entre ojos) el alpha
+    sube a 1 y el recorte la sigue sin retraso; quieta, filtra fuerte.
+    """
+
+    def __init__(self, alpha=0.3, max_dist=100, ttl=5):
+        self.alpha = alpha
+        self.max_dist = max_dist
+        self.ttl = ttl
+        self.tracks = []          # [{'lm': (5, 2), 'miss': int}]
+
+    def update(self, detecciones):
+        usados = set()
+        for det in detecciones:
+            if det.landmarks is None:
+                continue
+            centro = det.landmarks.mean(axis=0)
+            mejor, mejor_d = None, self.max_dist
+            for i, t in enumerate(self.tracks):
+                d = float(np.linalg.norm(t['lm'].mean(axis=0) - centro))
+                if i not in usados and d < mejor_d:
+                    mejor, mejor_d = i, d
+            if mejor is None:
+                self.tracks.append({'lm': det.landmarks.copy(), 'miss': 0})
+                usados.add(len(self.tracks) - 1)
+                continue
+            t = self.tracks[mejor]
+            ojos = max(1.0, float(np.linalg.norm(det.landmarks[0] - det.landmarks[1])))
+            movimiento = float(np.abs(det.landmarks - t['lm']).max()) / ojos
+            alpha = min(1.0, self.alpha + movimiento)
+            t['lm'] = alpha * det.landmarks + (1 - alpha) * t['lm']
+            t['miss'] = 0
+            usados.add(mejor)
+            det.landmarks = t['lm'].astype(np.float32)
+        for i, t in enumerate(self.tracks):
+            if i not in usados:
+                t['miss'] += 1
+        self.tracks = [t for t in self.tracks if t['miss'] <= self.ttl]
+
+
 class AgeSmoother:
     """Estabiliza la edad en el tiempo. Asocia cada cara con la del frame
-    anterior por cercania del centro y aplica una media exponencial (EMA).
+    anterior por cercania del centro y aplica una media exponencial (EMA) o
+    la mediana de las ultimas `ventana` predicciones. La mediana ignora los
+    saltos aislados (un frame con la cara de costado) en vez de arrastrarlos.
     Asi el numero deja de saltar frame a frame. Se puede apagar para mostrar
     la prediccion cruda (inestable) en el stand."""
 
-    def __init__(self, alpha=0.25, max_dist=100, ttl=12):
+    def __init__(self, modo='ema', alpha=0.25, ventana=9, max_dist=100, ttl=12):
+        self.modo = modo          # 'ema' o 'mediana'
         self.alpha = alpha        # cuanto pesa el frame nuevo (mas bajo = mas estable)
+        self.ventana = ventana    # frames que entran en la mediana
         self.max_dist = max_dist  # distancia max (px) para considerar "la misma cara"
         self.ttl = ttl            # frames que sobrevive una cara sin volver a verse
-        self.tracks = {}          # id -> {'c': (cx, cy), 'age': float, 'miss': int}
+        self.tracks = {}          # id -> {'c': (cx, cy), 'age': float, 'hist': deque, 'miss': int}
         self._next = 0
 
     @staticmethod
@@ -404,10 +578,16 @@ class AgeSmoother:
             if best is None:
                 best = self._next
                 self._next += 1
-                self.tracks[best] = {'c': (cx, cy), 'age': float(raw), 'miss': 0}
+                self.tracks[best] = {'c': (cx, cy), 'age': float(raw),
+                                     'hist': deque([float(raw)], maxlen=self.ventana),
+                                     'miss': 0}
             else:
                 t = self.tracks[best]
-                t['age'] = self.alpha * raw + (1 - self.alpha) * t['age']
+                if self.modo == 'mediana':
+                    t['hist'].append(float(raw))
+                    t['age'] = float(np.median(t['hist']))
+                else:
+                    t['age'] = self.alpha * raw + (1 - self.alpha) * t['age']
                 t['c'] = (cx, cy)
                 t['miss'] = 0
             used.add(best)
@@ -453,7 +633,10 @@ class Explicador:
     # Medido en MPS (M-series): Grad-CAM ~7 ms, oclusion 8x8 ~62 ms. El Grad-CAM
     # sale gratis y se recalcula siempre; la oclusion se limita para no bajar el
     # video de ~25 fps.
-    INTERVALOS = {'gradcam': 0.0, 'oclusion': 0.15}
+    # Segundos minimos entre mapas. El mapa ya se suaviza en el tiempo, asi que
+    # recalcular Grad-CAM a 10 Hz no se nota y libera ~13 ms en la mayoria de
+    # los frames.
+    INTERVALOS = {'gradcam': 0.1, 'oclusion': 0.15}
 
     def __init__(self, modelo, capa='layer4', metodo='gradcam', grilla=8,
                  alpha_ranking=0.3, alpha_mapa=0.35):
@@ -581,7 +764,7 @@ class Explicador:
             self._reiniciar_suavizado()
 
         inicio = time.time()
-        tensor = a_tensor(recorte.imagen)
+        tensor = a_tensor(recorte.imagen, self.modelo)
         delta_max = None
         if self.metodo == 'gradcam':
             _, mapas = self.gradcam(tensor, normalizar_salida=False)
@@ -682,6 +865,8 @@ class Estado:
     fps: Optional[float] = 0.0   # None = no mostrarlo (modo imagen)
     ensemble: bool = False
     recorte: str = 'alineado'    # 'alineado' | 'cuadrado'
+    recortes_tta: int = 1        # cuantas VARIANTES_TTA se predicen por frame
+    cara_min: int = 120          # ancho minimo (px del frame) para estimar una cara
 
 
 # ----------------------------------------------------------------------------
@@ -880,9 +1065,14 @@ def componer(frame, detecciones, edades, principal, expl, edad_p, dispersion_p, 
 # ----------------------------------------------------------------------------
 # Pipeline por frame
 # ----------------------------------------------------------------------------
-def procesar(frame, models, detector, explicador, smoother, estado, margen):
+def procesar(frame, models, detector, explicador, smoother, estado, margen,
+             suavizador_lm=None):
     """Detecta, predice, explica y devuelve el lienzo listo para mostrar."""
-    detecciones = detector.detect(frame)
+    # Las caras chicas (gente al fondo) no tienen detalle suficiente: la edad
+    # sale cualquier cosa y encima cada una cuesta un forward por modelo.
+    detecciones = [d for d in detector.detect(frame) if d.caja[2] >= estado.cara_min]
+    if estado.suavizado and suavizador_lm is not None:
+        suavizador_lm.update(detecciones)
     recortes, validas = [], []
     for det in detecciones:
         recorte = obtener_recorte(frame, det, margen, estado.recorte)
@@ -891,9 +1081,13 @@ def procesar(frame, models, detector, explicador, smoother, estado, margen):
         validas.append(det)
         recortes.append(recorte)
 
+    # En vivo alcanza con el recorte central: con el suavizado temporal prendido,
+    # 5 recortes por frame solo bajan el rango de la edad mostrada de ~1.2 a
+    # ~0.9 anios y cuestan ~20 ms por frame. Se suben con --recortes-tta.
+    variantes = VARIANTES_TTA[:estado.recortes_tta]
     crudas, dispersiones = [], []
     for recorte in recortes:
-        edad, dispersion = predecir_edad(models, recorte.imagen)
+        edad, dispersion = predecir_edad(models, variantes_recorte(frame, recorte, variantes))
         crudas.append(edad)
         dispersiones.append(dispersion)
 
@@ -942,13 +1136,16 @@ def calentar(models, explicador):
     explicador.invalidar()
 
 
-def guardar_captura(lienzo):
+def guardar_captura(lienzo, frame_crudo=None):
+    """Guarda la pantalla y, si se pasa, el frame de la camara sin nada dibujado
+    (`..._crudo.png`), que es el que sirve para volver a correrlo con --image."""
     os.makedirs(CARPETA_CAPTURAS, exist_ok=True)
-    nombre = os.path.join(
-        CARPETA_CAPTURAS, f"demo_{dt.datetime.now():%Y%m%d_%H%M%S}.png")
-    cv2.imwrite(nombre, lienzo)
-    print(f"[ok] Captura guardada en {nombre}")
-    return nombre
+    base = os.path.join(CARPETA_CAPTURAS, f"demo_{dt.datetime.now():%Y%m%d_%H%M%S}")
+    cv2.imwrite(base + '.png', lienzo)
+    if frame_crudo is not None:
+        cv2.imwrite(base + '_crudo.png', frame_crudo)
+    print(f"[ok] Captura guardada en {base}.png")
+    return base + '.png'
 
 
 def run_image(models, detector, explicador, image_path, margen, estado):
@@ -961,36 +1158,44 @@ def run_image(models, detector, explicador, image_path, margen, estado):
 
     # Se detecta e informa ANTES de componer, porque `procesar` pinta el mapa de
     # calor sobre `frame` y detectar de nuevo ahi daria otra cosa.
-    caras = detector.detect(frame)
+    caras = [d for d in detector.detect(frame) if d.caja[2] >= estado.cara_min]
     if not caras:
         print("[i] No detecte ninguna cara en la imagen.")
     for det in caras:
         recorte = obtener_recorte(frame, det, margen, estado.recorte)
         if recorte is None:
             continue
-        edad, dispersion = predecir_edad(models, recorte.imagen)
+        edad, dispersion = predecir_edad(models, variantes_recorte(frame, recorte))
         print(f"    Cara en {det.caja} -> {clamp_age(edad)} anios "
               f"(dispersion entre vistas: {dispersion:.1f})")
 
     lienzo = procesar(frame, models, detector, explicador, AgeSmoother(), estado, margen)
-    salida = 'demo_output.jpg'
+    os.makedirs(CARPETA_CAPTURAS, exist_ok=True)
+    salida = os.path.join(CARPETA_CAPTURAS, 'demo_output.jpg')
     cv2.imwrite(salida, lienzo)
     print(f"[ok] Guarde el resultado en {salida}")
 
 
-def run_webcam(models, detector, explicador, camera, margen, estado):
+def run_webcam(models, detector, explicador, camera, margen, estado, smoother):
     cap = cv2.VideoCapture(camera)
     if not cap.isOpened():
         print(f"[x] No pude abrir la camara {camera}.")
         return
+    # Muchas webcams USB dan 1280x720 a 30 fps solo en MJPG; en el formato por
+    # defecto (YUYV) bajan a 10-15 fps y la demo no puede ir mas rapido que eso.
+    # Si la camara no soporta MJPG, OpenCV ignora el pedido.
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    print(f"[i] Camara: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+          f"{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} a {cap.get(cv2.CAP_PROP_FPS):.0f} fps")
 
     titulo = "Estimacion de edad — Semana de la Salud Mental"
     cv2.namedWindow(titulo, cv2.WINDOW_NORMAL)
     print("[i] Webcam abierta. Apreta 'h' en la ventana para ver las teclas.")
 
-    smoother = AgeSmoother()
+    suavizador_lm = SuavizadorLandmarks()
     ultimo, congelado = time.time(), None
     lienzo = None
 
@@ -1004,7 +1209,8 @@ def run_webcam(models, detector, explicador, camera, margen, estado):
             frame = cv2.flip(frame, 1)  # espejo, mas natural
             congelado = frame.copy()
 
-        lienzo = procesar(frame, models, detector, explicador, smoother, estado, margen)
+        lienzo = procesar(frame, models, detector, explicador, smoother, estado, margen,
+                          suavizador_lm)
 
         ahora = time.time()
         estado.fps = 0.9 * estado.fps + 0.1 * (1.0 / max(ahora - ultimo, 1e-6))
@@ -1032,7 +1238,7 @@ def run_webcam(models, detector, explicador, camera, margen, estado):
         elif tecla == ord('l'):
             explicador.alternar_capa()
         elif tecla == ord('g') and lienzo is not None:
-            guardar_captura(lienzo)
+            guardar_captura(lienzo, congelado)
         elif tecla == ord('f'):
             estado.pantalla_completa = not estado.pantalla_completa
             cv2.setWindowProperty(
@@ -1045,12 +1251,20 @@ def run_webcam(models, detector, explicador, camera, margen, estado):
 
 # ----------------------------------------------------------------------------
 def main():
+    global SIGMA_ENTRADA, REDUCIR_ENTRADA, AUTOCONTRASTE
     ap = argparse.ArgumentParser(description="Demo en vivo de estimacion de edad.")
-    ap.add_argument('--model', default='checkpoints/arista.pt',
-                    help="Pesos del modelo arista (mejor modelo).")
+    ap.add_argument('--modelo', default='combinado', choices=['combinado', 'arista', 'resnet101'],
+                    help="combinado: promedio de resnet101 y arista (el de menor error en test). "
+                         "arista: ResNet-50 a 128 px. resnet101: ResNet-101 a 200 px con "
+                         "cabeza de distribucion (training/train_resnet101.py).")
+    ap.add_argument('--model', default=os.path.join(RAIZ, 'models', 'arista.pt'),
+                    help="Pesos de arista.")
+    ap.add_argument('--pesos-resnet101', default=os.path.join(RAIZ, 'models', 'resnet101_robusta.pt'),
+                    help="Pesos de la ResNet-101 (por defecto la entrenada con --aug fuerte, "
+                         "mas estable en webcam; la otra es models/resnet101.pt).")
     ap.add_argument('--ensemble', action='store_true',
                     help="Promediar arista + finetuneada (baja un poco el error).")
-    ap.add_argument('--model2', default='checkpoints/finetuneada.pt',
+    ap.add_argument('--model2', default=os.path.join(RAIZ, 'models', 'fine-tuneada.pt'),
                     help="Pesos del 2do modelo (finetuneada) para el ensemble.")
     ap.add_argument('--image', default=None,
                     help="Correr sobre una imagen en vez de la webcam.")
@@ -1058,6 +1272,22 @@ def main():
     ap.add_argument('--margin', type=float, default=0.2,
                     help="Margen alrededor de la cara al recortar.")
     ap.add_argument('--detector', default='auto', choices=['auto', 'yunet', 'haar'])
+    ap.add_argument('--recortes-tta', type=int, default=1, choices=range(1, 6),
+                    metavar='{1..5}',
+                    help="Recortes levemente corridos que se promedian por frame. 1 = mas "
+                         "fluido; 5 = un poco mas estable si la GPU lo banca.")
+    ap.add_argument('--cara-min', type=int, default=120,
+                    help="Ancho minimo de cara (px del frame) para estimarle la edad.")
+    ap.add_argument('--blur', type=float, default=SIGMA_ENTRADA,
+                    help="Sigma de un desenfoque del recorte antes de la red; alternativa "
+                         "a --reducir (p.ej. --blur 1.0 --reducir 0).")
+    ap.add_argument('--reducir', type=int, default=REDUCIR_ENTRADA,
+                    help="Achicar el recorte a N px antes de la red, para parecerse a la "
+                         "nitidez de UTKFace (0 = no achicar).")
+    ap.add_argument('--sin-autocontraste', dest='autocontraste', action='store_false',
+                    help="No estirar el contraste de la cara antes de la red.")
+    ap.add_argument('--ancho-deteccion', type=int, default=640,
+                    help="Ancho al que se achica el frame para detectar (0 = sin achicar).")
     ap.add_argument('--recorte', default='alineado', choices=['alineado', 'cuadrado'],
                     help="'alineado' reproduce el encuadre de UTKFace con los landmarks "
                          "(bastante mas preciso); 'cuadrado' es el recorte con margen de "
@@ -1065,10 +1295,16 @@ def main():
     ap.add_argument('--no-smooth', dest='smooth', action='store_false',
                     help="Arrancar sin suavizado temporal: edad, mapa y barras crudos "
                          "frame a frame (inestable, pero muestra como es la red en realidad).")
+    ap.add_argument('--suavizado', default='ema', choices=['ema', 'mediana'],
+                    help="Como se suaviza la edad: media exponencial (ema) o mediana "
+                         "de las ultimas --ventana predicciones (robusta a saltos aislados).")
+    ap.add_argument('--ventana', type=int, default=9,
+                    help="Cantidad de frames de la mediana (solo con --suavizado mediana).")
     ap.add_argument('--metodo', default='gradcam', choices=['gradcam', 'oclusion'],
                     help="Metodo de explicabilidad con el que arranca.")
     ap.add_argument('--capa', default='layer4', choices=['layer1', 'layer2', 'layer3', 'layer4'],
-                    help="Capa para el Grad-CAM. layer4 da 4x4 (manchas grandes), layer3 da 8x8.")
+                    help="Capa para el Grad-CAM. layer4 (7x7 en la ResNet-101 a 200 px) da "
+                         "zonas mas claras; layer3 da mas detalle pero mas disperso.")
     ap.add_argument('--grilla', type=int, default=8,
                     help="Resolucion de la grilla de oclusion (grilla^2 forwards por mapa).")
     ap.add_argument('--sin-explicacion', dest='explicar', action='store_false',
@@ -1078,15 +1314,27 @@ def main():
                          "(por defecto va solo en el panel de la derecha).")
     args = ap.parse_args()
 
-    if not os.path.exists(args.model):
-        print(f"[x] No encuentro los pesos: {args.model}")
-        print("    Pone los .pt entrenados en checkpoints/ (o pasa --model <ruta>).")
-        sys.exit(1)
+    rutas = {'arista': args.model, 'resnet101': args.pesos_resnet101}
+    usados = ['resnet101', 'arista'] if args.modelo == 'combinado' else [args.modelo]
+    for nombre in usados:
+        if not os.path.exists(rutas[nombre]):
+            print(f"[x] No encuentro los pesos de {nombre}: {rutas[nombre]}")
+            print("    Pone los .pt entrenados en models/ (o pasa la ruta por argumento).")
+            sys.exit(1)
 
     print(f"[i] Device: {DEVICE}")
-    models = [load_arista(args.model)]
+    # El primero es el que se explica: la ResNet-101 a 200 px da mapas que
+    # cambian mucho mas entre caras que arista a 128 px.
+    cargar = {'arista': load_arista, 'resnet101': load_resnet101}
+    models = [cargar[nombre](rutas[nombre]) for nombre in usados]
+    print(f"[i] Modelo: {' + '.join(usados)}")
     estado = Estado(suavizado=args.smooth, explicar=args.explicar,
-                    recorte=args.recorte, overlay=args.overlay)
+                    recorte=args.recorte, overlay=args.overlay,
+                    recortes_tta=args.recortes_tta, cara_min=args.cara_min)
+    SIGMA_ENTRADA = args.blur
+    REDUCIR_ENTRADA = args.reducir
+    AUTOCONTRASTE = args.autocontraste
+    estado.ensemble = len(models) > 1
     if args.ensemble:
         if os.path.exists(args.model2):
             models.append(load_finetuneada(args.model2))
@@ -1095,7 +1343,7 @@ def main():
         else:
             print(f"[!] No encontre {args.model2}; sigo solo con arista.")
 
-    detector = FaceDetector(prefer=args.detector)
+    detector = FaceDetector(prefer=args.detector, ancho_max=args.ancho_deteccion)
     if estado.recorte == 'alineado' and not detector.da_landmarks:
         print("[!] El detector Haar no da landmarks: uso el recorte cuadrado.")
         print("    Para el recorte alineado hace falta YuNet "
@@ -1110,7 +1358,9 @@ def main():
         if args.image:
             run_image(models, detector, explicador, args.image, args.margin, estado)
         else:
-            run_webcam(models, detector, explicador, args.camera, args.margin, estado)
+            smoother = AgeSmoother(modo=args.suavizado, ventana=args.ventana)
+            run_webcam(models, detector, explicador, args.camera, args.margin, estado,
+                       smoother)
     finally:
         explicador.cerrar()
 

@@ -2,12 +2,11 @@ from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torch import optim
 
-from model import model
-from config import config
+from age_estimation.config import config
 
-from custom_dataset_dataloader import train_set, train_loader
-from functions import train_one_epoch
-from model import AgeEstimationModel
+from age_estimation.dataset import train_set, train_loader
+from age_estimation.training.engine import train_one_epoch
+from age_estimation.models.frozen import AgeEstimationModel
 
 import csv
 from prettytable import PrettyTable

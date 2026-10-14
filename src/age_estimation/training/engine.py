@@ -1,8 +1,26 @@
 import torch
-from utils import AverageMeter
 from tqdm import tqdm
 
-from config import config
+from age_estimation.config import config
+
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
 
 def train_one_epoch(model, train_loader, loss_fn, optimizer, metric, epoch=1):
