@@ -1,14 +1,4 @@
-# Demo en vivo (demo_vivo.py + explicabilidad.py + interfaz.py).
-#
-# opencv-python se fija en la serie 4.x a proposito: OpenCV 5.0 dejo de
-# distribuir los haarcascades XML, con lo que el detector de respaldo
-# (cv2.data.haarcascades) queda vacio y la demo se queda sin plan B si falta
-# el modelo YuNet.
-torch>=2.1
-torchvision>=0.16
-opencv-python>=4.8,<5
-pillow>=10
-numpy>=1.24
-
-# Solo para los scripts de entrenamiento / analisis, no para la demo:
-#   timm, captum, torchmetrics, tensorboard, pandas, scikit-learn, matplotlib, tqdm
+# Las dependencias estan en pyproject.toml. Esto instala el paquete
+# (src/age_estimation) en modo editable, con lo necesario para entrenar.
+# Para la demo sola alcanza con: pip install -e .
+-e .[train]

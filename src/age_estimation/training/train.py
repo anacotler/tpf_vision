@@ -6,16 +6,16 @@ import torchmetrics as tm
 import os
 import matplotlib.pyplot as plt
 
-from config import config
-from model import AgeEstimationModel
-from model2 import AgeEstimationModel2
-from model3 import ResNet50WithAttention
-from functions import train_one_epoch, validation
-from custom_dataset_dataloader import train_loader, valid_loader
+from age_estimation.config import config
+from age_estimation.models.frozen import AgeEstimationModel
+from age_estimation.models.arista import AgeEstimationModel as AgeEstimationModel2
+from age_estimation.models.self_attention import ResNet50WithAttention
+from age_estimation.training.engine import train_one_epoch, validation
+from age_estimation.dataset import train_loader, valid_loader
 
 
 # create a folder to save checkpoints
-path = 'checkpoints'
+path = 'models'
 try:
     os.mkdir(path)
 except OSError as error:
@@ -81,7 +81,7 @@ for epoch in range(config['epochs']):
         best_loss = loss_valid
         if before_model_path is not None:
             os.remove(before_model_path)
-        before_model_path = f'checkpoints/capa_cong_epoch-{epoch}-loss_valid-{best_loss:.3}.pt'
+        before_model_path = f'models/capa_cong_epoch-{epoch}-loss_valid-{best_loss:.3}.pt'
         torch.save(model.state_dict(), before_model_path)
         print(f'\nModel saved in epoch: {epoch}')
 

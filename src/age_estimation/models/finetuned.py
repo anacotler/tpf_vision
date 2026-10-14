@@ -1,7 +1,7 @@
 from torch import nn
 from torchvision.models import resnet, efficientnet_b0
 import timm
-from config import config
+from age_estimation.config import config
 
 # Custom Model
 class AgeEstimationModel(nn.Module):
@@ -18,11 +18,6 @@ class AgeEstimationModel(nn.Module):
             self.model.fc = nn.Sequential(nn.Dropout(p=0.2, inplace=True),
                                           nn.Linear(in_features=2048, out_features=256, bias=True),
                                           nn.Linear(in_features=256, out_features=self.output_nodes, bias=True))
-        
-          # Congelar todas las capas excepto la capa `fc`
-            for name, param in self.model.named_parameters():
-                if not name.startswith("fc"):  # Congela las capas que no son `fc`
-                    param.requires_grad = False
 
         elif model_name == 'efficientnet':
             self.model = efficientnet_b0()

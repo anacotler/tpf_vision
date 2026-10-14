@@ -39,35 +39,12 @@ _INDICES_BACKBONE = {'layer1': 4, 'layer2': 5, 'layer3': 6, 'layer4': 7}
 # ----------------------------------------------------------------------------
 # Paleta del mapa de calor
 # ----------------------------------------------------------------------------
-# Rampa secuencial de UN SOLO tono, claro -> oscuro. Dos razones para no usar
-# una paleta tipo INFERNO/JET aunque sean las tipicas de los papers:
-#
-#   1. Una rampa secuencial correcta es de un solo tono; las multitono (arcoiris)
-#      inventan fronteras donde el dato es continuo.
-#   2. Esto se compone ENCIMA DE UNA CARA. El extremo bajo de INFERNO es violeta
-#      oscuro y, con alpha bajo sobre piel, tine toda la cara de violeta: se lee
-#      como un moreton. Sobre una persona real eso no es aceptable. El cian no
-#      existe como color de piel ni de lesion, asi que se lee siempre como una
-#      capa encima y nunca como algo que le pasa a la cara.
-#
-# El extremo claro queda casi transparente (el alpha es proporcional al valor),
-# asi que la cara fuera del foco queda intacta. Luminosidad monotona decreciente
-# en OKLab (L de 0.95 a 0.52, sin mesetas), que es el chequeo que corresponde a
-# una rampa secuencial.
-_PASOS_CALOR = ('#d4f5f7', '#93e4ea', '#3fc9d6', '#12a3b5', '#0b7686')
-
-
-def _lut_de_rampa(pasos):
-    """Pasos hex -> LUT 256x1x3 BGR para cv2.applyColorMap."""
-    puntos = np.array([[int(h[i:i + 2], 16) for i in (5, 3, 1)] for h in pasos],
-                      dtype=np.float32)          # hex es RGB, la LUT va en BGR
-    posiciones = np.linspace(0, 255, len(puntos))
-    rampa = np.stack([np.interp(np.arange(256), posiciones, puntos[:, c])
-                      for c in range(3)], axis=1)
-    return rampa.astype(np.uint8).reshape(256, 1, 3)
-
-
-PALETA_CALOR = _lut_de_rampa(_PASOS_CALOR)
+# Turbo, el mapa de calor clasico de los papers (azul -> verde -> amarillo ->
+# rojo). Sobre la imagen de la webcam es el que mas contrasta: se probaron
+# rampas de un solo tono (cian, verde, naranja-rojo) y sobre la piel se leian
+# poco o quedaban como sucio. El extremo frio (azul) casi no se ve porque el
+# alpha es proporcional al valor, asi que la cara fuera del foco queda intacta.
+PALETA_CALOR = cv2.COLORMAP_TURBO
 
 
 # ----------------------------------------------------------------------------
@@ -132,7 +109,7 @@ def ventana_ovalo(lado):
 # ----------------------------------------------------------------------------
 def resolver_capa(modelo, nombre='layer4'):
     """Devuelve el modulo de la capa pedida, sirviendo las dos familias de
-    modelos del proyecto: las que exponen `backbone` (model_arista, model2) y
+    modelos del proyecto: las que exponen `backbone` (models/arista.py, models/resnet101.py) y
     las que envuelven un torchvision resnet en `self.model` (el resto)."""
     if nombre not in _INDICES_BACKBONE:
         raise ValueError(f"Capa desconocida: {nombre}. Use una de {list(_INDICES_BACKBONE)}")
@@ -232,7 +209,11 @@ def mapa_oclusion(modelo, tensor, grilla=8, tam_parche=0.34, lote_max=32,
     """
     alto, ancho = tensor.shape[-2:]
     fondo = F.avg_pool2d(tensor, kernel_size=21, stride=1, padding=10)
-    edad_base = float(modelo(tensor).reshape(-1)[0].item())
+    # fp16 en GPU: son grilla^2 forwards por mapa y solo se miran diferencias
+    # de edad de anios, asi que la precision completa no aporta nada.
+    autocast = torch.autocast('cuda', dtype=torch.float16, enabled=tensor.is_cuda)
+    with autocast:
+        edad_base = float(modelo(tensor).reshape(-1)[0].float().item())
 
     lado = max(2, int(round(tam_parche * min(alto, ancho))))
     centros_y = ((np.arange(grilla) + 0.5) / grilla * alto).astype(int)
@@ -250,7 +231,8 @@ def mapa_oclusion(modelo, tensor, grilla=8, tam_parche=0.34, lote_max=32,
     predicciones = []
     for inicio in range(0, len(variantes), lote_max):
         lote = torch.cat(variantes[inicio:inicio + lote_max], dim=0)
-        predicciones.append(modelo(lote).reshape(-1).float().cpu())
+        with autocast:
+            predicciones.append(modelo(lote).reshape(-1).float().cpu())
     predicciones = torch.cat(predicciones).numpy()
 
     delta = np.abs(predicciones - edad_base).reshape(grilla, grilla)

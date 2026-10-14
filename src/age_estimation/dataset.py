@@ -7,26 +7,21 @@ from PIL import Image
 import pandas as pd
 import os
 
-from config import config
+from age_estimation.config import config
 
-# read csv that we created in `create_csv.py` file
-df = pd.read_csv('utkface_dataset.csv')
-
-df_train, df_test = train_test_split(df, train_size=0.8, random_state=config['seed'])
-df_train, df_valid = train_test_split(df_train, train_size=0.85, random_state=config['seed'])
-
-# Save the training, validation, and test sets in separate CSV files.
-
-
-directory = './csv_dataset'
-if not os.path.exists(directory):
-    os.makedirs(directory)
-
-df_train.to_csv(os.path.join(directory, 'train_set.csv'), index=False)
-df_valid.to_csv(os.path.join(directory, 'valid_set.csv'), index=False)
-df_test.to_csv(os.path.join(directory, 'test_set.csv'), index=False)
-
-print('All CSV files created successfully.')
+# El split de data/processed/ es con el que se entrenaron y evaluaron todos
+# los modelos. Solo se genera si falta: regenerarlo en cada import podria
+# cambiarlo en silencio con otra version de scikit-learn.
+directory = 'data/processed'
+if not os.path.exists(os.path.join(directory, 'test_set.csv')):
+    df = pd.read_csv('data/processed/utkface_dataset.csv')
+    df_train, df_test = train_test_split(df, train_size=0.8, random_state=config['seed'])
+    df_train, df_valid = train_test_split(df_train, train_size=0.85, random_state=config['seed'])
+    os.makedirs(directory, exist_ok=True)
+    df_train.to_csv(os.path.join(directory, 'train_set.csv'), index=False)
+    df_valid.to_csv(os.path.join(directory, 'valid_set.csv'), index=False)
+    df_test.to_csv(os.path.join(directory, 'test_set.csv'), index=False)
+    print('All CSV files created successfully.')
 
 # Define transformations
 transform_train = T.Compose([T.Resize((config['img_width'], config['img_height'])),
@@ -69,10 +64,10 @@ class UTKDataset(Dataset):
 
 
 # Utilize the UTKDataset class to instantiate dataset objects for the training, validation, and test sets.
-root_dir = '/home/anacotler/Documents/vision_artificial/tpf_vision/utkcropped'
-csv_file_train = './csv_dataset/train_set.csv'
-csv_file_valid = './csv_dataset/valid_set.csv'
-csv_file_test = './csv_dataset/test_set.csv'
+root_dir = 'data/raw/UTKFace'
+csv_file_train = 'data/processed/train_set.csv'
+csv_file_valid = 'data/processed/valid_set.csv'
+csv_file_test = 'data/processed/test_set.csv'
 
 # Define dataloader: Write dataloaders for the training, validation, and test sets.
 train_set = UTKDataset(root_dir, csv_file_train, transform_train)

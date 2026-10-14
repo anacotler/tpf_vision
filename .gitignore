@@ -1,24 +1,22 @@
-# Pesos de los modelos (se bajan del Drive; ver codigo/README.md)
-checkpoints/
+# Pesos de los modelos y del detector YuNet (no van al repo; ver README.md)
+/models/
 *.pt
 *.pth
-
-# Modelos de deteccion descargables (YuNet, etc.)
-models/
 *.onnx
 
-# Salidas generadas por la demo
-demo_output.jpg
+# Imagenes de UTKFace y el zip de Kaggle (los CSV de data/processed SI van)
+/data/raw/
+
+# Salidas: capturas de la demo, historias de entrenamiento, figuras
+/reports/
 
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
 
 # macOS
 .DS_Store
 
 # Entorno virtual del proyecto
 .venv/
-
-# Capturas de la demo
-capturas/
