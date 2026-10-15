@@ -80,10 +80,29 @@ RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')
 # 5 landmarks que usamos para nombrar las regiones de la cara).
 YUNET_PATH = os.path.join(RAIZ, 'models', 'face_detection_yunet_2023mar.onnx')
 
+# Escala de toda la interfaz: letra, panel, margenes, espaciados y grosores.
+# Todas las medidas de dibujo estan escritas para ESCALA_UI = 1 y pasan por
+# esc(), asi que cambiando este numero (--escala-ui) crece todo junto y nada se
+# superpone. Lo fija `aplicar_escala_ui`, que recalcula tambien las constantes
+# de abajo.
+ESCALA_UI = 1.0
+
+
+def esc(valor):
+    """Medida de la interfaz escrita para ESCALA_UI = 1 -> pixeles reales."""
+    return max(1, int(round(valor * ESCALA_UI)))
+
+
 ANCHO_PANEL = 400          # ancho del panel de explicacion, a la derecha
 ALTO_BARRA = 58            # franja inferior con el disclaimer
 ALTO_MIN = 730             # alto minimo del lienzo, para que entre el panel
 TAM_EXPL = 260             # lado en el que se calcula y se muestra el mapa
+
+
+def aplicar_escala_ui(escala):
+    global ESCALA_UI, ANCHO_PANEL, ALTO_BARRA, ALTO_MIN, TAM_EXPL
+    ESCALA_UI = escala
+    ANCHO_PANEL, ALTO_BARRA, ALTO_MIN, TAM_EXPL = esc(400), esc(58), esc(730), esc(260)
 
 CARPETA_CAPTURAS = os.path.join(RAIZ, 'reports', 'captures')
 
@@ -879,15 +898,15 @@ def etiqueta_edad(edad):
 def dibujar_cara(frame, caja, edad, textos, principal=False):
     x, y, ancho, alto = [int(v) for v in caja]
     color = ui.VERDE if principal else ui.TEXTO_TENUE
-    ui.caja_esquinas(frame, (x, y, ancho, alto), color, grosor=3 if principal else 2)
+    ui.caja_esquinas(frame, (x, y, ancho, alto), color, grosor=esc(3 if principal else 2))
 
     etiqueta = etiqueta_edad(edad)
-    tam = 30 if principal else 22
+    tam = esc(30 if principal else 22)
     ancho_txt = ui.ancho_texto(etiqueta, tam, 'bold')
-    ancho_pill = ancho_txt + 28
-    alto_pill = tam + 16
+    ancho_pill = ancho_txt + esc(28)
+    alto_pill = tam + esc(16)
     # Si no entra arriba de la caja, va adentro.
-    py = y - alto_pill - 8 if y - alto_pill - 8 >= 0 else y + 8
+    py = y - alto_pill - esc(8) if y - alto_pill - esc(8) >= 0 else y + esc(8)
     px = x
     ui.panel_traslucido(frame, (px, py), (px + ancho_pill, py + alto_pill),
                         ui.FONDO_BARRA, alpha=0.80, radio=alto_pill // 2)
@@ -897,25 +916,26 @@ def dibujar_cara(frame, caja, edad, textos, principal=False):
 
 def dibujar_sin_caras(frame, textos):
     alto, ancho = frame.shape[:2]
-    ui.panel_traslucido(frame, (ancho // 2 - 220, alto // 2 - 44),
-                        (ancho // 2 + 220, alto // 2 + 44), ui.FONDO_BARRA, 0.70, 16)
-    textos.append(ui.Texto(ancho // 2, alto // 2 - 12, "No veo ninguna cara",
-                           26, ui.TEXTO, 'bold', 'mm'))
-    textos.append(ui.Texto(ancho // 2, alto // 2 + 20, "Acercate y mirá a la cámara",
-                           17, ui.TEXTO_TENUE, 'regular', 'mm'))
+    ui.panel_traslucido(frame, (ancho // 2 - esc(220), alto // 2 - esc(44)),
+                        (ancho // 2 + esc(220), alto // 2 + esc(44)), ui.FONDO_BARRA,
+                        0.70, esc(16))
+    textos.append(ui.Texto(ancho // 2, alto // 2 - esc(12), "No veo ninguna cara",
+                           esc(26), ui.TEXTO, 'bold', 'mm'))
+    textos.append(ui.Texto(ancho // 2, alto // 2 + esc(20), "Acercate y mirá a la cámara",
+                           esc(17), ui.TEXTO_TENUE, 'regular', 'mm'))
 
 
 def dibujar_ayuda(frame, textos):
     alto, ancho = frame.shape[:2]
-    alto_caja = 62 + len(AYUDA) * 30
-    x0, y0 = 40, max(20, alto // 2 - alto_caja // 2)
-    x1, y1 = x0 + 430, y0 + alto_caja
-    ui.panel_traslucido(frame, (x0, y0), (x1, y1), ui.FONDO_BARRA, 0.88, 16)
-    textos.append(ui.Texto(x0 + 24, y0 + 22, "TECLAS", 14, ui.TEXTO_TENUE, 'bold'))
+    alto_caja = esc(62) + len(AYUDA) * esc(30)
+    x0, y0 = esc(40), max(esc(20), alto // 2 - alto_caja // 2)
+    x1, y1 = x0 + esc(430), y0 + alto_caja
+    ui.panel_traslucido(frame, (x0, y0), (x1, y1), ui.FONDO_BARRA, 0.88, esc(16))
+    textos.append(ui.Texto(x0 + esc(24), y0 + esc(22), "TECLAS", esc(14), ui.TEXTO_TENUE, 'bold'))
     for i, (tecla, que) in enumerate(AYUDA):
-        y = y0 + 50 + i * 30
-        textos.append(ui.Texto(x0 + 24, y, tecla, 17, ui.ACENTO, 'bold'))
-        textos.append(ui.Texto(x0 + 150, y, que, 17, ui.TEXTO, 'regular'))
+        y = y0 + esc(50) + i * esc(30)
+        textos.append(ui.Texto(x0 + esc(24), y, tecla, esc(17), ui.ACENTO, 'bold'))
+        textos.append(ui.Texto(x0 + esc(150), y, que, esc(17), ui.TEXTO, 'regular'))
 
 
 def dibujar_panel(lienzo, x_panel, alto_panel, expl, edad, dispersion, estado, textos):
@@ -926,100 +946,101 @@ def dibujar_panel(lienzo, x_panel, alto_panel, expl, edad, dispersion, estado, t
     """
     px = x_panel
     lienzo[:alto_panel, px:px + ANCHO_PANEL] = ui.FONDO_PANEL
-    izq, der = px + 24, px + ANCHO_PANEL - 24
+    izq, der = px + esc(24), px + ANCHO_PANEL - esc(24)
 
     def linea(y):
-        cv2.line(lienzo, (izq, y), (der, y), ui.LINEA, 1)
+        cv2.line(lienzo, (izq, y), (der, y), ui.LINEA, esc(1))
 
-    textos.append(ui.Texto(izq, 20, "LO QUE MIRA LA RED", 14, ui.TEXTO_TENUE, 'bold'))
-    linea(44)
+    textos.append(ui.Texto(izq, esc(20), "LO QUE MIRA LA RED", esc(14), ui.TEXTO_TENUE, 'bold'))
+    linea(esc(44))
 
     # --- La cara tal como entra a la red (128x128 reescalado), con el mapa.
-    ix, iy = px + (ANCHO_PANEL - TAM_EXPL) // 2, 56
+    ix, iy = px + (ANCHO_PANEL - TAM_EXPL) // 2, esc(56)
     if expl is not None:
         vista = superponer(expl.miniatura, expl.mapa, 0.85) if expl.activa else expl.miniatura.copy()
         if estado.contornos and expl.mascaras:
-            vista = dibujar_contornos_regiones(vista, expl.mascaras, (120, 120, 120), 1)
+            vista = dibujar_contornos_regiones(vista, expl.mascaras, (120, 120, 120), esc(1))
         lienzo[iy:iy + TAM_EXPL, ix:ix + TAM_EXPL] = vista
-        cv2.rectangle(lienzo, (ix - 1, iy - 1), (ix + TAM_EXPL, iy + TAM_EXPL), ui.LINEA, 1)
+        cv2.rectangle(lienzo, (ix - 1, iy - 1), (ix + TAM_EXPL, iy + TAM_EXPL), ui.LINEA, esc(1))
     else:
         cv2.rectangle(lienzo, (ix, iy), (ix + TAM_EXPL, iy + TAM_EXPL), (40, 37, 34), -1)
         textos.append(ui.Texto(ix + TAM_EXPL // 2, iy + TAM_EXPL // 2,
-                               "esperando una cara", 16, ui.TEXTO_TENUE, 'regular', 'mm'))
+                               "esperando una cara", esc(16), ui.TEXTO_TENUE, 'regular', 'mm'))
 
     # --- Que metodo produjo ese mapa, y cuanto tardo.
-    y = iy + TAM_EXPL + 18
+    y = iy + TAM_EXPL + esc(18)
     if expl is None:
-        textos.append(ui.Texto(izq, y, "Sin cara a la vista", 17, ui.TEXTO_TENUE, 'bold'))
-        textos.append(ui.Texto(izq, y + 24, "La explicación necesita una cara detectada.",
-                               13, ui.TEXTO_TENUE))
+        textos.append(ui.Texto(izq, y, "Sin cara a la vista", esc(17), ui.TEXTO_TENUE, 'bold'))
+        textos.append(ui.Texto(izq, y + esc(24), "La explicación necesita una cara detectada.",
+                               esc(13), ui.TEXTO_TENUE))
     elif not expl.activa:
-        textos.append(ui.Texto(izq, y, "Explicación apagada", 17, ui.TEXTO_TENUE, 'bold'))
-        textos.append(ui.Texto(izq, y + 24, "Apretá 'e' para ver dónde mira.",
-                               13, ui.TEXTO_TENUE))
+        textos.append(ui.Texto(izq, y, "Explicación apagada", esc(17), ui.TEXTO_TENUE, 'bold'))
+        textos.append(ui.Texto(izq, y + esc(24), "Apretá 'e' para ver dónde mira.",
+                               esc(13), ui.TEXTO_TENUE))
     else:
         if expl.metodo == 'gradcam':
             titulo, detalle = "Grad-CAM", f" · {expl.capa}"
         else:
             titulo, detalle = "Oclusión", f" · grilla {expl.grilla}×{expl.grilla}"
-        textos.append(ui.Texto(izq, y, titulo + detalle, 17, ui.ACENTO, 'bold'))
-        textos.append(ui.Texto(der, y + 2, f"{expl.ms:.0f} ms", 14, ui.TEXTO_TENUE,
+        textos.append(ui.Texto(izq, y, titulo + detalle, esc(17), ui.ACENTO, 'bold'))
+        textos.append(ui.Texto(der, y + esc(2), f"{expl.ms:.0f} ms", esc(14), ui.TEXTO_TENUE,
                                'regular', 'ra'))
         for i, nota in enumerate(NOTAS_METODO[expl.metodo]):
-            textos.append(ui.Texto(izq, y + 24 + i * 17, nota, 13, ui.TEXTO_TENUE))
+            textos.append(ui.Texto(izq, y + esc(24) + i * esc(17), nota, esc(13), ui.TEXTO_TENUE))
 
     # --- Reparto del mapa entre las regiones de la cara.
-    y += 66
+    y += esc(66)
     linea(y)
-    y += 16
-    textos.append(ui.Texto(izq, y, "DÓNDE MIRA", 14, ui.TEXTO_TENUE, 'bold'))
-    y += 22
+    y += esc(16)
+    textos.append(ui.Texto(izq, y, "DÓNDE MIRA", esc(14), ui.TEXTO_TENUE, 'bold'))
+    y += esc(22)
     ranking = expl.ranking if (expl is not None and expl.activa) else []
     if ranking:
         tope = max(valor for _, valor in ranking) or 1.0
         for i, (nombre, valor) in enumerate(ranking[:5]):
-            fila = y + i * 28
+            fila = y + i * esc(28)
             destacado = (i == 0)
             color = ui.ACENTO if destacado else ui.TEXTO
             peso = 'medium' if destacado else 'regular'
-            textos.append(ui.Texto(izq, fila, nombre, 15, color, peso))
-            ui.barra(lienzo, px + 210, fila + 6, 118, 9, valor / tope,
+            textos.append(ui.Texto(izq, fila, nombre, esc(15), color, peso))
+            ui.barra(lienzo, px + esc(210), fila + esc(6), esc(118), esc(9), valor / tope,
                      ui.ACENTO if destacado else (110, 105, 100))
-            textos.append(ui.Texto(der, fila, f"{valor:.0f}%", 15, color, peso, 'ra'))
+            textos.append(ui.Texto(der, fila, f"{valor:.0f}%", esc(15), color, peso, 'ra'))
     else:
-        textos.append(ui.Texto(izq, y, "—", 15, ui.TEXTO_TENUE))
+        textos.append(ui.Texto(izq, y, "—", esc(15), ui.TEXTO_TENUE))
 
     # --- El numero, que es lo que la gente vino a ver.
-    y += 5 * 28 + 2
+    y += 5 * esc(28) + esc(2)
     linea(y)
-    y += 16
-    textos.append(ui.Texto(izq, y, "EDAD ESTIMADA", 13, ui.TEXTO_TENUE, 'bold'))
+    y += esc(16)
+    textos.append(ui.Texto(izq, y, "EDAD ESTIMADA", esc(13), ui.TEXTO_TENUE, 'bold'))
     if edad is not None:
-        textos.append(ui.Texto(izq, y + 18, f"{edad}", 46, ui.TEXTO, 'bold'))
-        textos.append(ui.Texto(izq + 6 + ui.ancho_texto(f"{edad}", 46, 'bold'), y + 46,
-                               "año" if edad == 1 else "años", 18, ui.TEXTO_TENUE))
+        textos.append(ui.Texto(izq, y + esc(18), f"{edad}", esc(46), ui.TEXTO, 'bold'))
+        textos.append(ui.Texto(izq + esc(6) + ui.ancho_texto(f"{edad}", esc(46), 'bold'),
+                               y + esc(46), "año" if edad == 1 else "años", esc(18),
+                               ui.TEXTO_TENUE))
         if dispersion is not None:
-            textos.append(ui.Texto(der, y + 30, f"±{dispersion:.1f} entre vistas",
-                                   13, ui.TEXTO_TENUE, 'regular', 'ra'))
+            textos.append(ui.Texto(der, y + esc(30), f"±{dispersion:.1f} entre vistas",
+                                   esc(13), ui.TEXTO_TENUE, 'regular', 'ra'))
     else:
-        textos.append(ui.Texto(izq, y + 18, "—", 46, ui.TEXTO_TENUE, 'bold'))
+        textos.append(ui.Texto(izq, y + esc(18), "—", esc(46), ui.TEXTO_TENUE, 'bold'))
 
     if expl is not None and expl.activa and expl.delta_max is not None:
         textos.append(ui.Texto(
-            izq, y + 78,
+            izq, y + esc(78),
             f"Taparle la zona más sensible le mueve la edad {expl.delta_max:.1f} años.",
-            13, ui.TEXTO_TENUE))
+            esc(13), ui.TEXTO_TENUE))
 
 
 def dibujar_barra_inferior(lienzo, y0, estado, textos):
     ancho = lienzo.shape[1]
     lienzo[y0:, :] = ui.FONDO_BARRA
-    cv2.line(lienzo, (0, y0), (ancho, y0), ui.LINEA, 1)
+    cv2.line(lienzo, (0, y0), (ancho, y0), ui.LINEA, esc(1))
     textos.append(ui.Texto(
-        20, y0 + 12,
+        esc(20), y0 + esc(12),
         "Estimación aproximada. El modelo se entrenó con UTKFace y puede errar bastante "
         "según la luz, el ángulo, la edad y los rasgos de cada cara.",
-        15, ui.TEXTO_TENUE))
+        esc(15), ui.TEXTO_TENUE))
     estados = [
         f"{estado.fps:.1f} fps" if estado.fps is not None else None,
         DEVICE,
@@ -1028,10 +1049,10 @@ def dibujar_barra_inferior(lienzo, y0, estado, textos):
         f"suavizado {'on' if estado.suavizado else 'off'}",
         "CONGELADO" if estado.congelado else None,
     ]
-    textos.append(ui.Texto(20, y0 + 34, "  ·  ".join(e for e in estados if e),
-                           13, ui.TEXTO_TENUE))
-    textos.append(ui.Texto(ancho - 20, y0 + 34, "h: ayuda  ·  q: salir",
-                           13, ui.TEXTO_TENUE, 'regular', 'ra'))
+    textos.append(ui.Texto(esc(20), y0 + esc(34), "  ·  ".join(e for e in estados if e),
+                           esc(13), ui.TEXTO_TENUE))
+    textos.append(ui.Texto(ancho - esc(20), y0 + esc(34), "h: ayuda  ·  q: salir",
+                           esc(13), ui.TEXTO_TENUE, 'regular', 'ra'))
 
 
 def componer(frame, detecciones, edades, principal, expl, edad_p, dispersion_p, estado):
@@ -1176,7 +1197,66 @@ def run_image(models, detector, explicador, image_path, margen, estado):
     print(f"[ok] Guarde el resultado en {salida}")
 
 
-def run_webcam(models, detector, explicador, camera, margen, estado, smoother):
+TITULO_VENTANA = "Estimación de edad — Semana de la Salud Mental"
+
+
+def poner_titulo_unicode(nombre_ventana, titulo=TITULO_VENTANA):
+    """En Windows, cambia el titulo visible de la ventana por uno con acentos.
+
+    OpenCV identifica la ventana por `nombre_ventana` (que tiene que ser ASCII)
+    en su propia tabla, no por el texto de la barra, asi que cambiar el texto
+    con la API Unicode de Windows no rompe imshow ni waitKey. En Linux y macOS
+    el backend ya maneja UTF-8 y no hace falta.
+    """
+    if sys.platform != 'win32':
+        return
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.FindWindowW(None, nombre_ventana)
+        if hwnd:
+            ctypes.windll.user32.SetWindowTextW(hwnd, titulo)
+    except Exception:
+        pass
+
+
+def tamano_pantalla():
+    """(ancho, alto) de la pantalla, o None si no se puede saber.
+
+    OpenCV no lo expone; tkinter viene con Python en Windows, macOS y la
+    mayoria de los Linux. En Windows con escalado de pantalla (125%, 150%...)
+    devuelve el tamano en las mismas unidades que usa la ventana de OpenCV, asi
+    que el ajuste de abajo sale bien igual.
+    """
+    try:
+        import tkinter
+        raiz = tkinter.Tk()
+        raiz.withdraw()
+        tamano = raiz.winfo_screenwidth(), raiz.winfo_screenheight()
+        raiz.destroy()
+        return tamano
+    except Exception:
+        return None
+
+
+def ajustar_ventana(titulo, lienzo, pantalla, fraccion=0.9):
+    """Agranda (o achica) la ventana para que ocupe ~90% de la pantalla sin
+    deformar el lienzo. El lienzo se dibuja en pixeles fijos y OpenCV lo
+    muestra 1:1, asi que en un monitor grande o de alta resolucion todo se veia
+    chiquito; con la ventana WINDOW_NORMAL el sistema lo escala entero."""
+    if pantalla is None:
+        return
+    ancho_p, alto_p = pantalla
+    # Con dos monitores lado a lado tkinter devuelve el escritorio entero (p.ej.
+    # 3840x1080) y la ventana quedaria partida entre los dos: se asume un
+    # monitor de 16:9 como maximo.
+    ancho_p = min(ancho_p, alto_p * 16 // 9)
+    alto_l, ancho_l = lienzo.shape[:2]
+    factor = fraccion * min(ancho_p / ancho_l, alto_p / alto_l)
+    cv2.resizeWindow(titulo, int(ancho_l * factor), int(alto_l * factor))
+
+
+def run_webcam(models, detector, explicador, camera, margen, estado, smoother,
+               ajustar=True):
     cap = cv2.VideoCapture(camera)
     if not cap.isOpened():
         print(f"[x] No pude abrir la camara {camera}.")
@@ -1191,9 +1271,14 @@ def run_webcam(models, detector, explicador, camera, margen, estado, smoother):
     print(f"[i] Camara: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
           f"{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} a {cap.get(cv2.CAP_PROP_FPS):.0f} fps")
 
-    titulo = "Estimacion de edad — Semana de la Salud Mental"
+    # Solo ASCII: en Windows OpenCV le pasa el titulo al sistema como texto
+    # ANSI y cualquier caracter fuera de ASCII (acentos, la raya) sale como
+    # basura. `poner_titulo_unicode` lo reemplaza por la version con acentos.
+    titulo = "Estimacion de edad - Semana de la Salud Mental"
+    pantalla = tamano_pantalla() if ajustar else None
     cv2.namedWindow(titulo, cv2.WINDOW_NORMAL)
     print("[i] Webcam abierta. Apreta 'h' en la ventana para ver las teclas.")
+    ventana_ajustada = False
 
     suavizador_lm = SuavizadorLandmarks()
     ultimo, congelado = time.time(), None
@@ -1217,6 +1302,10 @@ def run_webcam(models, detector, explicador, camera, margen, estado, smoother):
         ultimo = ahora
 
         cv2.imshow(titulo, lienzo)
+        if not ventana_ajustada:
+            ajustar_ventana(titulo, lienzo, pantalla)
+            poner_titulo_unicode(titulo)
+            ventana_ajustada = True
         # Mientras esta congelado no hay que correr a full: el frame no cambia.
         tecla = cv2.waitKey(30 if estado.congelado else 1) & 0xFF
         if tecla in (ord('q'), 27):
@@ -1251,7 +1340,7 @@ def run_webcam(models, detector, explicador, camera, margen, estado, smoother):
 
 # ----------------------------------------------------------------------------
 def main():
-    global SIGMA_ENTRADA, REDUCIR_ENTRADA, AUTOCONTRASTE
+    global SIGMA_ENTRADA, REDUCIR_ENTRADA, AUTOCONTRASTE, DEVICE
     ap = argparse.ArgumentParser(description="Demo en vivo de estimacion de edad.")
     ap.add_argument('--modelo', default='combinado', choices=['combinado', 'arista', 'resnet101'],
                     help="combinado: promedio de resnet101 y arista (el de menor error en test). "
@@ -1309,10 +1398,20 @@ def main():
                     help="Resolucion de la grilla de oclusion (grilla^2 forwards por mapa).")
     ap.add_argument('--sin-explicacion', dest='explicar', action='store_false',
                     help="Arrancar con la explicacion apagada.")
+    ap.add_argument('--device', default='auto', choices=['auto', 'cuda', 'cpu', 'mps'],
+                    help="Donde corren los modelos. auto = GPU si hay. En CPU conviene "
+                         "--modelo arista, que es bastante mas liviano.")
+    ap.add_argument('--escala-ui', type=float, default=1.0,
+                    help="Tamano de toda la interfaz (letra, panel, margenes) respecto "
+                         "del video. 1.5 = todo 50%% mas grande.")
+    ap.add_argument('--no-ajustar-ventana', dest='ajustar_ventana', action='store_false',
+                    help="No agrandar la ventana al ~90%% de la pantalla al arrancar.")
     ap.add_argument('--overlay', action='store_true',
                     help="Arrancar pintando el mapa de calor tambien sobre el video "
                          "(por defecto va solo en el panel de la derecha).")
     args = ap.parse_args()
+    # Antes de crear el Explicador: TAM_EXPL (el lado del mapa) depende de la escala.
+    aplicar_escala_ui(args.escala_ui)
 
     rutas = {'arista': args.model, 'resnet101': args.pesos_resnet101}
     usados = ['resnet101', 'arista'] if args.modelo == 'combinado' else [args.modelo]
@@ -1322,6 +1421,8 @@ def main():
             print("    Pone los .pt entrenados en models/ (o pasa la ruta por argumento).")
             sys.exit(1)
 
+    if args.device != 'auto':
+        DEVICE = args.device
     print(f"[i] Device: {DEVICE}")
     # El primero es el que se explica: la ResNet-101 a 200 px da mapas que
     # cambian mucho mas entre caras que arista a 128 px.
@@ -1360,7 +1461,7 @@ def main():
         else:
             smoother = AgeSmoother(modo=args.suavizado, ventana=args.ventana)
             run_webcam(models, detector, explicador, args.camera, args.margin, estado,
-                       smoother)
+                       smoother, ajustar=args.ajustar_ventana)
     finally:
         explicador.cerrar()
 

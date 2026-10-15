@@ -65,6 +65,14 @@ python -m age_estimation.demo --image foto.jpg   # una imagen; guarda reports/ca
 python -m age_estimation.demo --help             # todas las opciones
 ```
 
+Sin GPU: `--device cpu --modelo arista` (~11 fps con la explicación, ~17 sin
+ella, en un CPU de 16 hilos; el modelo combinado anda a ~5-6).
+
+Al arrancar, la ventana se agranda a ~90% de la pantalla (todo escala junto;
+`--no-ajustar-ventana` para no hacerlo). Si la letra queda chica respecto del
+video, `--escala-ui 1.5` agranda toda la interfaz (letra, panel, márgenes) de
+forma proporcional.
+
 Teclas: `q` salir, `espacio` congelar, `e` explicación on/off, `m` Grad-CAM ↔
 oclusión, `l` capa del Grad-CAM, `o` mapa también sobre el video, `s`
 suavizado, `g` guardar captura (pantalla + frame crudo), `h` ayuda.

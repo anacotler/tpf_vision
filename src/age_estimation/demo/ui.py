@@ -35,27 +35,53 @@ ACENTO = (214, 201, 63)
 VERDE = (120, 215, 130)
 ROJO = (90, 90, 245)
 
-# (ruta, indice dentro del .ttc) por peso, en orden de preferencia.
+# (ruta, indice dentro del .ttc) por peso, en orden de preferencia: macOS,
+# Windows y Linux. Si no aparece ninguna, `fuente` cae a la de Pillow.
+_WIN = os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts')
 _CANDIDATOS = {
     'regular': [
         ('/System/Library/Fonts/HelveticaNeue.ttc', 0),
         ('/System/Library/Fonts/Helvetica.ttc', 0),
         ('/System/Library/Fonts/Supplemental/Arial.ttf', 0),
+        (os.path.join(_WIN, 'segoeui.ttf'), 0),
+        (os.path.join(_WIN, 'arial.ttf'), 0),
         ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 0),
     ],
     'medium': [
         ('/System/Library/Fonts/HelveticaNeue.ttc', 10),
         ('/System/Library/Fonts/Helvetica.ttc', 0),
         ('/System/Library/Fonts/Supplemental/Arial.ttf', 0),
+        (os.path.join(_WIN, 'seguisb.ttf'), 0),     # Segoe UI Semibold
+        (os.path.join(_WIN, 'arial.ttf'), 0),
         ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 0),
     ],
     'bold': [
         ('/System/Library/Fonts/HelveticaNeue.ttc', 1),
         ('/System/Library/Fonts/Helvetica.ttc', 1),
         ('/System/Library/Fonts/Supplemental/Arial Bold.ttf', 0),
+        (os.path.join(_WIN, 'segoeuib.ttf'), 0),
+        (os.path.join(_WIN, 'arialbd.ttf'), 0),
         ('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 0),
     ],
 }
+
+
+def _dejavu_de_matplotlib():
+    """Ultimo candidato: la DejaVu que trae matplotlib, si esta instalado. La
+    fuente que trae Pillow no tiene acentos ni enie."""
+    try:
+        import matplotlib
+        carpeta = os.path.join(matplotlib.get_data_path(), 'fonts', 'ttf')
+    except Exception:
+        return {}
+    return {'regular': [(os.path.join(carpeta, 'DejaVuSans.ttf'), 0)],
+            'medium': [(os.path.join(carpeta, 'DejaVuSans.ttf'), 0)],
+            'bold': [(os.path.join(carpeta, 'DejaVuSans-Bold.ttf'), 0)]}
+
+
+for _peso, _extra in _dejavu_de_matplotlib().items():
+    _CANDIDATOS[_peso] += _extra
+
 
 # x, y: posicion. ancla: convencion de PIL ('la' = izquierda/arriba, 'mm' =
 # centrado, 'ra' = derecha/arriba, 'ls' = izquierda/linea base).
@@ -71,8 +97,13 @@ def fuente(tam, peso='regular'):
                 return ImageFont.truetype(ruta, tam, index=indice)
             except OSError:
                 continue
-    # Ultimo recurso: la bitmap de PIL. Fea y de tamano fijo, pero no rompe.
-    return ImageFont.load_default()
+    # Ultimo recurso: la que trae Pillow (sin acentos). Sin `size` devuelve una de tamano
+    # fijo (~10 px) que ignora `tam`: todo el texto salia igual de chico. Con
+    # `size` (Pillow >= 10.1) respeta el tamano.
+    try:
+        return ImageFont.load_default(size=tam)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def ancho_texto(texto, tam, peso='regular'):
